@@ -1,6 +1,7 @@
 #include "engine.h"
 
 #include "log.h"
+#include "rtv_math.h"
 #include "generated/screen_quad_shaders.h"
 
 #define DEFAULT_WND_WIDTH 1200
@@ -8,13 +9,17 @@
 
 #define DEFAULT_STORAGE_BUFFER_SIZE (1024*1024)
 
-typedef struct EngineFrameData_t {
-    float x, y, z, w;
-} EngineFrameData;
+#define WORLD_UP ((Vec3){ .x = 0.0f, .y = 1.0f, .z = 0.0f })
+#define DEFAULT_CAMERA_SENSITIVITY 0.01f
+#define DEFAULT_CAMERA_SPEED 0.01f
+#define CAMERA_SPEED_CHANGE_SENSITIVITY 0.1f
 
 static bool check_if_file_changed(const char* path, SDL_Time* cached_time);
 static bool engine_hot_reload_compute(Engine* self);
 static void engine_draw(Engine* self);
+static void engine_update_camera(Engine* self);
+static void engine_update_mouse(Engine* self);
+static bool engine_key_down(Engine* self, SDL_Scancode key);
 
 bool engine_initialize(Engine* self, const char* compute_shader_path) {
     ZERO_MEM(self);
@@ -130,6 +135,15 @@ bool engine_initialize(Engine* self, const char* compute_shader_path) {
         return false;
     }
 
+    // Keyboard state pointer
+    self->keys = SDL_GetKeyboardState(&self->keys_num);
+
+    // Camera initial state
+    self->camera.forward.z   = 1.0f;
+    self->camera.fov_y       = RADIANS(40.0f);
+    self->camera.sensitivity = DEFAULT_CAMERA_SENSITIVITY;
+    self->camera.speed       = DEFAULT_CAMERA_SPEED;
+
     return true;
 }
 
@@ -162,9 +176,19 @@ void engine_run(Engine* self) {
                 case SDL_EVENT_QUIT:
                     should_close = true;
                     break;
+                case SDL_EVENT_MOUSE_WHEEL:
+                    self->camera.speed +=CAMERA_SPEED_CHANGE_SENSITIVITY * event.wheel.integer_y;
+                    break;
             }
         }
+
+        engine_update_mouse(self);
+        engine_update_camera(self);
+
+        INFO("(%f, %f, %f)", self->camera.pos.x, self->camera.pos.y, self->camera.pos.z);
+
         engine_hot_reload_compute(self);
+
         engine_draw(self);
     }
 }
@@ -204,7 +228,7 @@ bool engine_hot_reload_compute(Engine* self) {
     );
     shaderc_compilation_status status = shaderc_result_get_compilation_status(compilation_result);
     if (status != shaderc_compilation_status_success) {
-        fprintf(stderr, "Compilation error:\n%s\n", shaderc_result_get_error_message(compilation_result));
+        INFO("\nCompilation error:\n%s\n", shaderc_result_get_error_message(compilation_result));
 
         shaderc_result_release(compilation_result);
         SDL_free(source);
@@ -262,8 +286,7 @@ void engine_draw(Engine* self) {
         SDL_GPUComputePass* compute_pass = SDL_BeginGPUComputePass(command_buffer, &texture_rw_binding, 1, NULL, 0);
         SDL_BindGPUComputePipeline(compute_pass, self->compute_pipeline);
         SDL_BindGPUComputeStorageBuffers(compute_pass, 0, &self->storage_buffer, 1);
-        EngineFrameData frame_data = { 0.0, 0.9, 0.0, 1.0 };
-        SDL_PushGPUComputeUniformData(command_buffer, 0, &frame_data, sizeof(EngineFrameData));
+        SDL_PushGPUComputeUniformData(command_buffer, 0, &self->frame_data, sizeof(self->frame_data));
         SDL_DispatchGPUCompute(compute_pass, (self->screen_texture_width + 7) / 8, (self->screen_texture_height + 7) / 8, 1);
         SDL_EndGPUComputePass(compute_pass);
 
@@ -285,5 +308,102 @@ void engine_draw(Engine* self) {
     }
 
     SDL_SubmitGPUCommandBuffer(command_buffer);
+}
+
+void engine_update_camera(Engine* self) {
+    EngineCamera* cam = &self->camera;
+
+    // Process mouse input
+    if (self->mouse_buttons.left) {
+        cam->yaw   -= cam->sensitivity * self->mouse_delta.x;
+        cam->pitch -= cam->sensitivity * self->mouse_delta.y;
+        cam->pitch = clamp(cam->pitch, RADIANS(-89.0f), RADIANS(89.0f));
+    }
+
+    // Update camera vectors
+    cam->forward = (Vec3){
+        .x = cosf(cam->pitch) * sinf(cam->yaw),
+        .y = sinf(cam->pitch),
+        .z = cosf(cam->pitch) * cos(cam->yaw),
+    };
+
+    cam->right = vec3_norm(vec3_cross(cam->forward, WORLD_UP));
+    cam->up = vec3_cross(cam->right, cam->forward);
+
+    // Update position
+    if (engine_key_down(self, SDL_SCANCODE_W)) {
+        cam->pos = vec3_add(cam->pos, vec3_mul(cam->speed, cam->forward));
+    }
+    else if (engine_key_down(self, SDL_SCANCODE_S)) {
+        cam->pos = vec3_sub(cam->pos, vec3_mul(cam->speed, cam->forward));
+    }
+    if (engine_key_down(self, SDL_SCANCODE_A)) {
+        cam->pos = vec3_sub(cam->pos, vec3_mul(cam->speed, cam->right));
+    }
+    else if (engine_key_down(self, SDL_SCANCODE_D)) {
+        cam->pos = vec3_add(cam->pos, vec3_mul(cam->speed, cam->right));
+    }
+    if (engine_key_down(self, SDL_SCANCODE_Q)) {
+        cam->pos = vec3_add(cam->pos, vec3_mul(cam->speed, WORLD_UP));
+    }
+    else if (engine_key_down(self, SDL_SCANCODE_E)) {
+        cam->pos = vec3_sub(cam->pos, vec3_mul(cam->speed, WORLD_UP));
+    }
+
+    // Fill frame_data for compute shader
+    f32 half_height = tanf(cam->fov_y / 2);
+    f32 half_width = half_height * (f32)self->screen_texture_width / (f32)self->screen_texture_height;
+
+    Vec3 half_right_vec = vec3_mul(half_width, cam->right);
+    Vec3 half_up_vec = vec3_mul(half_height, cam->up);
+
+    // Center of the image plane in world space (distance = 1.0)
+    Vec3 center = vec3_add(cam->pos, cam->forward);
+
+    Vec3 top_row    = vec3_add(center, half_up_vec);
+    Vec3 bottom_row = vec3_sub(center, half_up_vec);
+
+    Vec3 tl = vec3_sub(top_row,    half_right_vec);
+    Vec3 tr = vec3_add(top_row,    half_right_vec);
+    Vec3 bl = vec3_sub(bottom_row, half_right_vec);
+    Vec3 br = vec3_add(bottom_row, half_right_vec);
+
+    self->frame_data.vp_top_left     = vec4_from_vec3(tl, 1.0f);
+    self->frame_data.vp_top_right    = vec4_from_vec3(tr, 1.0f);
+    self->frame_data.vp_bottom_left  = vec4_from_vec3(bl, 1.0f);
+    self->frame_data.vp_bottom_right = vec4_from_vec3(br, 1.0f);
+
+    self->frame_data.origin          = vec4_from_vec3(cam->pos, 1.0f);
+}
+
+void engine_update_mouse(Engine* self) {
+    // Position
+    u32 button_flags = SDL_GetMouseState(&self->mouse.x, &self->mouse.y);
+
+    static float prev_x = 0.0f;
+    static float prev_y = 0.0f;
+    static bool is_first_sample = true;
+
+    if (is_first_sample) {
+        is_first_sample = false;
+        self->mouse_delta = (Vec2){ 0.0f, 0.0f };
+    }
+    else {
+        self->mouse_delta = (Vec2){ self->mouse.x - prev_x, self->mouse.y - prev_y };
+    }
+
+    prev_x = self->mouse.x;
+    prev_y = self->mouse.y;
+
+    // Buttons
+    self->mouse_buttons.left  = button_flags & SDL_BUTTON_MASK(SDL_BUTTON_LEFT);
+    self->mouse_buttons.right = button_flags & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT);
+}
+
+bool engine_key_down(Engine* self, SDL_Scancode key) {
+    if (key < self->keys_num && self->keys[key]) {
+        return true;
+    }
+    return false;
 }
 

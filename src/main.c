@@ -1,5 +1,10 @@
 #include "engine.h"
 
+// TODO:
+// - add a camera
+// - raytrace a sphere
+// - do some voxel shit for fuck's sake
+
 int main() {
     Engine engine;
     if (!engine_initialize(&engine, "shaders/rtv.comp"))

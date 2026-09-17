@@ -27,6 +27,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wall)
 
 # Linking
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    m
     SDL3::SDL3
     shaderc
 )

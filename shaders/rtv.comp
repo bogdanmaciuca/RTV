@@ -2,16 +2,12 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(std430, set = 0, binding = 1) readonly buffer VoxelData {
-    uint voxels[];
-};
-
 layout(std140, set = 2, binding = 0) uniform CameraBlock {
-    // mat4 invView;
-    // mat4 invProj;
-    // vec4 cameraPos;
-    // vec2 resolution;
-    vec4 color;
+    vec4 top_left;     // World-space point on focus plane
+    vec4 top_right;    // World-space point on focus plane
+    vec4 bottom_right; // World-space point on focus plane
+    vec4 bottom_left;  // World-space point on focus plane
+    vec4 origin;       // World-space camera position
 } camera;
 
 layout(set = 1, binding = 0, rgba8) uniform image2D output_image;
@@ -19,14 +15,42 @@ layout(set = 1, binding = 0, rgba8) uniform image2D output_image;
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
     ivec2 image_size = imageSize(output_image);
-
     if (coord.x >= image_size.x || coord.y >= image_size.y) {
         return;
     }
 
-    vec2 uv = vec2(coord) / vec2(image_size - 1);
+    // 1. Normalized screen coords (with Y flipped if you noticed it was upside down)
+    vec2 uv = (vec2(coord) + 0.5) / vec2(image_size);
 
-    vec4 color = camera.color * vec4(uv.x, uv.y, 0.0, 1.0);
+    // 2. Interpolate the 4 WORLD-SPACE CORNER POINTS
+    vec3 top_pt    = mix(camera.top_left.xyz,    camera.top_right.xyz,    uv.x);
+    vec3 bottom_pt = mix(camera.bottom_left.xyz, camera.bottom_right.xyz, uv.x);
 
-    imageStore(output_image, coord, color);
+    // Point on the image/focus plane for this pixel:
+    vec3 pixel_world_pos = mix(bottom_pt, top_pt, uv.y);
+
+    // 3. Construct the ray
+    vec3 ro = camera.origin.xyz;
+
+    // THE KEY FIX: Subtract origin FIRST, then normalize!
+    vec3 rd = normalize(pixel_world_pos - ro);
+
+    // -------------------------------------------------------------
+    // Rest of your ground checkerboard / scene intersection logic:
+    vec3 color = vec3(0.05);
+
+    if (rd.y < -0.001) {
+        float t = -ro.y / rd.y;
+        if (t > 0.0) {
+            vec3 hit_pos = ro + t * rd;
+            vec2 grid = floor(hit_pos.xz);
+            float check = mod(grid.x + grid.y, 2.0);
+            vec3 grid_color = (check > 0.5) ? vec3(0.8) : vec3(0.3);
+
+            float fog = clamp(t / 50.0, 0.0, 1.0);
+            color = mix(grid_color, vec3(0.1, 0.1, 0.15), fog);
+        }
+    }
+
+    imageStore(output_image, coord, vec4(color, 1.0));
 }
