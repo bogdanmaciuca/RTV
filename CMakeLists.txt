@@ -14,6 +14,7 @@ find_package(SDL3 REQUIRED CONFIG)
 # Source files
 file(GLOB SRCS
     src/*.c
+    vendor/**/*.c
 )
 
 # Executable target

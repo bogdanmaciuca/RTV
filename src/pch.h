@@ -9,6 +9,8 @@
 #include <SDL3/SDL.h>
 #include <shaderc/shaderc.h>
 
+#include "../vendor/stb/stb_truetype.h"
+
 #ifdef _NDEBUG
 #define RTV_DEBUG 0
 #else
@@ -28,4 +30,4 @@ typedef double    f64;
 typedef uint8_t   byte;
 
 #define ZERO_MEM(ptr) memset(ptr, 0, sizeof(*ptr))
-
+#define ALIGN(x, align) ((byte *)(((uintptr_t)(ptr) + ((uintptr_t)(align) - 1)) & ~((uintptr_t)(align) - 1)))

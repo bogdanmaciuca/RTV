@@ -12,6 +12,27 @@ layout(std140, set = 2, binding = 0) uniform CameraBlock {
 
 layout(set = 1, binding = 0, rgba8) uniform image2D output_image;
 
+// Analytical Ray-Sphere Intersection
+// Returns the distance along the ray 't' to the closest hit, or -1.0 on miss
+float intersect_sphere(vec3 ro, vec3 rd, vec3 center, float radius) {
+    vec3 oc = ro - center;
+    float b = dot(oc, rd);
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - c;
+
+    if (discriminant < 0.0) {
+        return -1.0; // Ray missed the sphere
+    }
+
+    float sqrt_disc = sqrt(discriminant);
+    float t0 = -b - sqrt_disc;
+    float t1 = -b + sqrt_disc;
+
+    if (t0 > 0.001) return t0;
+    if (t1 > 0.001) return t1;
+    return -1.0;
+}
+
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
     ivec2 image_size = imageSize(output_image);
@@ -19,35 +40,66 @@ void main() {
         return;
     }
 
-    // 1. Normalized screen coords (with Y flipped if you noticed it was upside down)
+    // 1. Normalized screen coordinates
     vec2 uv = (vec2(coord) + 0.5) / vec2(image_size);
 
-    // 2. Interpolate the 4 WORLD-SPACE CORNER POINTS
+    // 2. Interpolate corner world points
     vec3 top_pt    = mix(camera.top_left.xyz,    camera.top_right.xyz,    uv.x);
     vec3 bottom_pt = mix(camera.bottom_left.xyz, camera.bottom_right.xyz, uv.x);
-
-    // Point on the image/focus plane for this pixel:
     vec3 pixel_world_pos = mix(bottom_pt, top_pt, uv.y);
 
-    // 3. Construct the ray
+    // 3. Ray generation
     vec3 ro = camera.origin.xyz;
-
-    // THE KEY FIX: Subtract origin FIRST, then normalize!
     vec3 rd = normalize(pixel_world_pos - ro);
 
-    // -------------------------------------------------------------
-    // Rest of your ground checkerboard / scene intersection logic:
+    // Default background / sky color
     vec3 color = vec3(0.05);
 
+    // Track closest hit
+    float t_min = 1e30;
+
+    // -------------------------------------------------------------
+    // Object 1: Sphere definition
+    vec3 sphere_center = vec3(0.0, 1.0, 0.0); // 1 unit above origin (rests on ground)
+    float sphere_radius = 1.0;
+
+    float t_sphere = intersect_sphere(ro, rd, sphere_center, sphere_radius);
+    if (t_sphere > 0.0 && t_sphere < t_min) {
+        t_min = t_sphere;
+
+        vec3 hit_pos = ro + t_min * rd;
+        vec3 normal  = normalize(hit_pos - sphere_center);
+
+        // Directional light from upper right
+        vec3 light_dir = normalize(vec3(0.6, 1.0, 0.4));
+        vec3 view_dir  = -rd;
+
+        // Diffuse (Lambert)
+        float diff = max(dot(normal, light_dir), 0.0);
+
+        // Specular (Blinn-Phong)
+        vec3 half_vector = normalize(light_dir + view_dir);
+        float spec = pow(max(dot(normal, half_vector), 0.0), 32.0);
+
+        // Ambient + Diffuse + Specular
+        vec3 base_color = vec3(1.0, 0.35, 0.15); // Vibrant orange sphere
+        color = base_color * (0.1 + 0.7 * diff) + vec3(1.0) * (0.5 * spec);
+    }
+
+    // -------------------------------------------------------------
+    // Object 2: Checkerboard Floor at Y = 0
     if (rd.y < -0.001) {
-        float t = -ro.y / rd.y;
-        if (t > 0.0) {
-            vec3 hit_pos = ro + t * rd;
+        float t_floor = -ro.y / rd.y;
+        if (t_floor > 0.0 && t_floor < t_min) {
+            t_min = t_floor;
+
+            vec3 hit_pos = ro + t_min * rd;
             vec2 grid = floor(hit_pos.xz);
             float check = mod(grid.x + grid.y, 2.0);
-            vec3 grid_color = (check > 0.5) ? vec3(0.8) : vec3(0.3);
+            vec3 grid_color = (check > 0.5) ? vec3(0.8) : vec3(0.25);
 
-            float fog = clamp(t / 50.0, 0.0, 1.0);
+            // Simple distance fog
+            float fog = clamp(t_min / 50.0, 0.0, 1.0);
             color = mix(grid_color, vec3(0.1, 0.1, 0.15), fog);
         }
     }

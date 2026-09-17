@@ -4,15 +4,28 @@
 #include "rtv_math.h"
 #include "generated/screen_quad_shaders.h"
 
+#define ARENA_CAPACITY 4 * 1024 * 1024
+
 #define DEFAULT_WND_WIDTH 1200
 #define DEFAULT_WND_HEIGHT 675
 
-#define DEFAULT_STORAGE_BUFFER_SIZE (1024*1024)
+#define TRANSFER_BUFFER_SIZE (4 * 1024 * 1024)
+
+#define DEFAULT_STORAGE_BUFFER_SIZE (512*512)
+
+#define FONT_ATLAS_WIDTH  512
+#define FONT_ATLAS_HEIGHT 512
+#define FONT_SIZE         12
 
 #define WORLD_UP ((Vec3){ .x = 0.0f, .y = 1.0f, .z = 0.0f })
 #define DEFAULT_CAMERA_SENSITIVITY 0.01f
 #define DEFAULT_CAMERA_SPEED 0.01f
 #define CAMERA_SPEED_CHANGE_SENSITIVITY 0.1f
+
+typedef struct TextVertex_t {
+    Vec2 pos;
+    Vec2 uv;
+} TextVertex;
 
 static bool check_if_file_changed(const char* path, SDL_Time* cached_time);
 static bool engine_hot_reload_compute(Engine* self);
@@ -20,9 +33,12 @@ static void engine_draw(Engine* self);
 static void engine_update_camera(Engine* self);
 static void engine_update_mouse(Engine* self);
 static bool engine_key_down(Engine* self, SDL_Scancode key);
+static bool engine_upload_to_texture(Engine* self, SDL_GPUTexture* texture, u32 width, u32 height, void* data, size_t size);
 
-bool engine_initialize(Engine* self, const char* compute_shader_path) {
+bool engine_create(Engine* self, const char* compute_shader_path, const char* debug_font_path) {
     ZERO_MEM(self);
+
+    arena_create(&self->arena, ARENA_CAPACITY);
 
     // Initialize SDL
     u32 init_flags = SDL_INIT_VIDEO;
@@ -110,6 +126,15 @@ bool engine_initialize(Engine* self, const char* compute_shader_path) {
         return false;
     }
 
+    // Transfer buffer
+    SDL_GPUTransferBufferCreateInfo transfer_buffer_create_info = {
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = TRANSFER_BUFFER_SIZE,
+    };
+    if (!SDL_CHECK(self->transfer_buffer = SDL_CreateGPUTransferBuffer(self->device, &transfer_buffer_create_info))) {
+        return false;
+    }
+
     // Shaderc
     if (!CHECK(self->shader_compiler = shaderc_compiler_initialize(), "")) {
         return false;
@@ -135,6 +160,42 @@ bool engine_initialize(Engine* self, const char* compute_shader_path) {
         return false;
     }
 
+    // Font atlas
+    self->font_atlas.width = FONT_ATLAS_WIDTH;
+    self->font_atlas.height = FONT_ATLAS_HEIGHT;
+    if (!CHECK(self->font_atlas.pixels = malloc(sizeof(u8) * FONT_ATLAS_WIDTH * FONT_ATLAS_HEIGHT), "Could not allocate font atlas memory")) {
+        return false;
+    }
+    // Load font file
+    size_t font_file_size;
+    byte* font_file_data;
+    if (!SDL_CHECK(font_file_data = SDL_LoadFile(debug_font_path, &font_file_size))) {
+        return false;
+    }
+    stbtt_BakeFontBitmap(
+        font_file_data,
+        0,
+        FONT_SIZE,
+        self->font_atlas.pixels,
+        FONT_ATLAS_WIDTH,
+        FONT_ATLAS_HEIGHT,
+        32,
+        FONT_ATLAS_CHAR_NUM,
+        self->font_atlas.data
+    );
+    SDL_free(font_file_data);
+    // Upload to GPU texture
+    engine_upload_to_texture(
+        self,
+        self->font_atlas_texture,
+        self->font_atlas.width,
+        self->font_atlas.height,
+        self->font_atlas.pixels,
+        self->font_atlas.width * self->font_atlas.height * sizeof(u8)
+    );
+    free(self->font_atlas.pixels);
+    self->font_atlas.pixels = NULL;
+
     // Keyboard state pointer
     self->keys = SDL_GetKeyboardState(&self->keys_num);
 
@@ -147,7 +208,7 @@ bool engine_initialize(Engine* self, const char* compute_shader_path) {
     return true;
 }
 
-void engine_shutdown(Engine* self) {
+void engine_destroy(Engine* self) {
     SDL_ReleaseGPUBuffer(self->device, self->storage_buffer);
     SDL_ReleaseGPUComputePipeline(self->device, self->compute_pipeline);
 
@@ -164,6 +225,8 @@ void engine_shutdown(Engine* self) {
     SDL_DestroyWindow(self->window);
 
     SDL_Quit();
+
+    arena_destroy(&self->arena);
 }
 
 void engine_run(Engine* self) {
@@ -210,7 +273,7 @@ bool engine_hot_reload_compute(Engine* self) {
     }
 
     // Load source code
-    u8* source;
+    byte* source;
     size_t source_size;
     if (!SDL_CHECK(source = SDL_LoadFile(self->compute_shader_path, &source_size))) {
         return false;
@@ -405,5 +468,38 @@ bool engine_key_down(Engine* self, SDL_Scancode key) {
         return true;
     }
     return false;
+}
+
+static bool engine_upload_to_texture(Engine* self, SDL_GPUTexture* texture, u32 width, u32 height, void* data, size_t size) {
+    void* mapped_memory;
+    if (!SDL_CHECK(mapped_memory = SDL_MapGPUTransferBuffer(self->device, self->transfer_buffer, false))) {
+        return false;
+    }
+    memcpy(mapped_memory, data, size);
+    SDL_UnmapGPUTransferBuffer(self->device, self->transfer_buffer);
+
+    SDL_GPUCommandBuffer* command_buffer = SDL_AcquireGPUCommandBuffer(self->device);
+
+    SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(command_buffer);
+    SDL_UploadToGPUTexture(
+        copy_pass,
+        &(SDL_GPUTextureTransferInfo){
+            .transfer_buffer = self->transfer_buffer,
+            .offset = 0,
+        },
+        &(SDL_GPUTextureRegion){
+            .texture = texture,
+            .w = width,
+            .h = height,
+            .d = 1
+        },
+        false
+    );
+    SDL_EndGPUCopyPass(copy_pass);
+
+    if (!SDL_CHECK(SDL_SubmitGPUCommandBuffer(command_buffer))) {
+        return false;
+    }
+    return true;
 }
 

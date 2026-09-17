@@ -1,18 +1,19 @@
 #include "engine.h"
 
 // TODO:
-// - add a camera
-// - raytrace a sphere
-// - do some voxel shit for fuck's sake
+// - create font atlas texture
+// - check in renderdoc if uploaded correctly
+// - write a basic draw_line() function
+// - create pipeline for drawing text
 
 int main() {
     Engine engine;
-    if (!engine_initialize(&engine, "shaders/rtv.comp"))
+    if (!engine_create(&engine, "shaders/rtv.comp", "res/SFMonoRegular-ASCII.otf"))
         return 1;
 
     engine_run(&engine);
 
-    engine_shutdown(&engine);
+    engine_destroy(&engine);
     return 0;
 }
 
