@@ -2,22 +2,31 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 1, binding = 0, rgba8) uniform image2D u_OutputImage;
+layout(std430, set = 0, binding = 1) readonly buffer VoxelData {
+    uint voxels[];
+};
 
-void main()
-{
-    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 imageDimensions = imageSize(u_OutputImage);
+layout(std140, set = 2, binding = 0) uniform CameraBlock {
+    // mat4 invView;
+    // mat4 invProj;
+    // vec4 cameraPos;
+    // vec2 resolution;
+    vec4 color;
+} camera;
 
-    // Bounds check to avoid writing out-of-bounds pixels
-    if (pixelCoord.x >= imageDimensions.x || pixelCoord.y >= imageDimensions.y)
-    {
+layout(set = 1, binding = 0, rgba8) uniform image2D output_image;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 image_size = imageSize(output_image);
+
+    if (coord.x >= image_size.x || coord.y >= image_size.y) {
         return;
     }
 
-    vec2 uv = vec2(pixelCoord) / vec2(imageDimensions - 1);
+    vec2 uv = vec2(coord) / vec2(image_size - 1);
 
-    vec4 color = vec4(uv.x, uv.y, 0.0, 1.0);
+    vec4 color = camera.color * vec4(uv.x, uv.y, 0.0, 1.0);
 
-    imageStore(u_OutputImage, pixelCoord, color);
+    imageStore(output_image, coord, color);
 }
