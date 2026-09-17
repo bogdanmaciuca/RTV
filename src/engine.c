@@ -6,6 +6,12 @@
 #define DEFAULT_WND_WIDTH 1200
 #define DEFAULT_WND_HEIGHT 675
 
+#define DEFAULT_STORAGE_BUFFER_SIZE (1024*1024)
+
+typedef struct EngineFrameData_t {
+    float x, y, z, w;
+} EngineFrameData;
+
 static bool check_if_file_changed(const char* path, SDL_Time* cached_time);
 static bool engine_hot_reload_compute(Engine* self);
 static void engine_draw(Engine* self);
@@ -115,10 +121,20 @@ bool engine_initialize(Engine* self, const char* compute_shader_path) {
         return false;
     }
 
+    // Storage buffer
+    SDL_GPUBufferCreateInfo storage_buffer_create_info = {
+        .usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
+        .size  = DEFAULT_STORAGE_BUFFER_SIZE
+    };
+    if (!SDL_CHECK(self->storage_buffer = SDL_CreateGPUBuffer(self->device, &storage_buffer_create_info))) {
+        return false;
+    }
+
     return true;
 }
 
 void engine_shutdown(Engine* self) {
+    SDL_ReleaseGPUBuffer(self->device, self->storage_buffer);
     SDL_ReleaseGPUComputePipeline(self->device, self->compute_pipeline);
 
     shaderc_compile_options_release(self->shader_compile_options);
@@ -148,6 +164,7 @@ void engine_run(Engine* self) {
                     break;
             }
         }
+        engine_hot_reload_compute(self);
         engine_draw(self);
     }
 }
@@ -204,7 +221,9 @@ bool engine_hot_reload_compute(Engine* self) {
         .code                           = spirv_bytecode,
         .entrypoint                     = "main",
         .format                         = SDL_GPU_SHADERFORMAT_SPIRV,
+        .num_readonly_storage_buffers   = 1,
         .num_readwrite_storage_textures = 1,
+        .num_uniform_buffers            = 1,
         .threadcount_x                  = 8,
         .threadcount_y                  = 8,
         .threadcount_z                  = 1,
@@ -242,7 +261,10 @@ void engine_draw(Engine* self) {
         SDL_GPUStorageTextureReadWriteBinding texture_rw_binding = { .texture = self->screen_texture };
         SDL_GPUComputePass* compute_pass = SDL_BeginGPUComputePass(command_buffer, &texture_rw_binding, 1, NULL, 0);
         SDL_BindGPUComputePipeline(compute_pass, self->compute_pipeline);
-        SDL_DispatchGPUCompute(compute_pass, self->screen_texture_width / 8 + 1, self->screen_texture_height / 8 + 1, 1);
+        SDL_BindGPUComputeStorageBuffers(compute_pass, 0, &self->storage_buffer, 1);
+        EngineFrameData frame_data = { 0.0, 0.9, 0.0, 1.0 };
+        SDL_PushGPUComputeUniformData(command_buffer, 0, &frame_data, sizeof(EngineFrameData));
+        SDL_DispatchGPUCompute(compute_pass, (self->screen_texture_width + 7) / 8, (self->screen_texture_height + 7) / 8, 1);
         SDL_EndGPUComputePass(compute_pass);
 
         // Draw quad to screen
