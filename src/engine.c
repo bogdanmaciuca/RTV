@@ -5,6 +5,7 @@
 #include "generated/screen_quad_shaders.h"
 
 #define ARENA_CAPACITY 4 * 1024 * 1024
+#define FRAME_ARENA_CAPACITY 1024
 
 #define DEFAULT_WND_WIDTH 1200
 #define DEFAULT_WND_HEIGHT 675
@@ -13,9 +14,10 @@
 
 #define DEFAULT_STORAGE_BUFFER_SIZE (512*512)
 
-#define FONT_ATLAS_WIDTH  128
-#define FONT_ATLAS_HEIGHT 128
-#define FONT_SIZE         16
+#define FONT_ATLAS_WIDTH    128
+#define FONT_ATLAS_HEIGHT   128
+#define FONT_SIZE           16
+#define FRAME_TEXT_CAPACITY 1024
 
 #define WORLD_UP ((Vec3){ .x = 0.0f, .y = 1.0f, .z = 0.0f })
 #define DEFAULT_CAMERA_SENSITIVITY 0.01f
@@ -34,11 +36,15 @@ static void engine_update_camera(Engine* self);
 static void engine_update_mouse(Engine* self);
 static bool engine_key_down(Engine* self, SDL_Scancode key);
 static bool engine_upload_to_texture(Engine* self, SDL_GPUTexture* texture, u32 width, u32 height, void* data, size_t size);
+static void engine_text_reset(Engine* self);
+static void engine_text_render(Engine* self);
+static void engine_text_print(Engine* self, const char* fmt, ...);
 
 bool engine_create(Engine* self, const char* compute_shader_path, const char* debug_font_path) {
     ZERO_MEM(self);
 
     arena_create(&self->arena, ARENA_CAPACITY);
+    arena_create(&self->frame_arena, FRAME_ARENA_CAPACITY);
 
     // Initialize SDL
     u32 init_flags = SDL_INIT_VIDEO;
@@ -207,6 +213,14 @@ bool engine_create(Engine* self, const char* compute_shader_path, const char* de
     );
     free(self->font_atlas.pixels);
     self->font_atlas.pixels = NULL;
+    // Font atlas sampler
+    SDL_GPUSamplerCreateInfo font_sampler_create_info = {
+        .min_filter = SDL_GPU_FILTER_LINEAR,
+        .mag_filter = SDL_GPU_FILTER_LINEAR,
+    };
+    if (!SDL_CHECK(self->font_sampler = SDL_CreateGPUSampler(self->device, &font_sampler_create_info))) {
+        return false;
+    }
 
     // Keyboard state pointer
     self->keys = SDL_GetKeyboardState(&self->keys_num);
@@ -248,6 +262,9 @@ void engine_run(Engine* self) {
     bool should_close = false;
 
     while (!should_close) {
+        arena_reset(&self->frame_arena);
+        engine_text_reset(self);
+
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -266,6 +283,8 @@ void engine_run(Engine* self) {
         engine_hot_reload_compute(self);
 
         engine_draw(self);
+
+        engine_text_render(self);
     }
 }
 
@@ -514,5 +533,32 @@ static bool engine_upload_to_texture(Engine* self, SDL_GPUTexture* texture, u32 
         return false;
     }
     return true;
+}
+
+static void engine_text_reset(Engine* self) {
+    self->frame_text = arena_alloc_align(&self->frame_arena, FRAME_TEXT_CAPACITY, 16);
+    self->frame_text_len = 0;
+}
+
+void engine_text_render(Engine* self) {
+    // ...
+
+    self->frame_text_len = 0;
+}
+
+void engine_text_print(Engine* self, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int msg_len = vsnprintf(self->frame_text + self->frame_text_len, FRAME_TEXT_CAPACITY - self->frame_text_len, fmt, args);
+    va_end(args);
+
+    // Old text + new text + '\n' + '\0'
+    if (self->frame_text_len + msg_len + 2 > FRAME_TEXT_CAPACITY) {
+        WARN("Debug text exceeds capacity: %d > %d", self->frame_text_len + msg_len + 2, FRAME_TEXT_CAPACITY);
+    }
+
+    self->frame_text_len += msg_len;
+    self->frame_text[self->frame_text_len++] = '\n';
+    self->frame_text[self->frame_text_len] = '\0';
 }
 

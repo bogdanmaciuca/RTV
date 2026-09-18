@@ -34,6 +34,7 @@ typedef struct EngineFrameData_t {
 
 typedef struct Engine_t {
     Arena arena;
+    Arena frame_arena;
 
     SDL_Window*              window;
     SDL_GPUDevice*           device;
@@ -60,6 +61,8 @@ typedef struct Engine_t {
     SDL_GPUTexture*          font_atlas_texture;
     SDL_GPUSampler*          font_sampler;
     SDL_GPUGraphicsPipeline* font_pipeline;
+    char*                    frame_text;
+    u32                      frame_text_len;
 
     const bool*  keys;
     int          keys_num;

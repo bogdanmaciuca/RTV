@@ -1,9 +1,7 @@
 #include "engine.h"
 
 // TODO:
-// - create font atlas texture
-// - check in renderdoc if uploaded correctly
-// - write a basic draw_line() function
+// - make arrays of resource pointers which are automatically released at the end of the program
 // - create pipeline for drawing text
 
 int main() {
