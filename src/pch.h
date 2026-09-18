@@ -1,7 +1,9 @@
 #pragma once
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,4 +32,5 @@ typedef double    f64;
 typedef uint8_t   byte;
 
 #define ZERO_MEM(ptr) memset(ptr, 0, sizeof(*ptr))
-#define ALIGN(x, align) ((byte *)(((uintptr_t)(ptr) + ((uintptr_t)(align) - 1)) & ~((uintptr_t)(align) - 1)))
+#define ALIGN(x, align) ((byte *)(((uintptr_t)(x) + ((uintptr_t)(align) - 1)) & ~((uintptr_t)(align) - 1)))
+#define ALIGNOF(T) offsetof(struct { char c; T member; }, member)

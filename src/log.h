@@ -6,10 +6,12 @@
 
 #define INFO(fmt, ...) LOG("INFO", fmt, ##__VA_ARGS__)
 
+#define WARN(fmt, ...) LOG("WARN", fmt, ##__VA_ARGS__)
+
 #define ERROR(fmt, ...) LOG("ERROR", fmt, ##__VA_ARGS__)
 
-#define CHECK(x, message) \
-    ((x) ? 1 : (ERROR("[%s] %s", #x, message), 0))
+#define CHECK(x, fmt, ...) \
+    ((x) ? 1 : (ERROR("Check failed: [%s] " fmt, #x, ##__VA_ARGS__), 0))
 
 #define SDL_CHECK(x) \
     ((x) ? 1 : (ERROR("[%s] (SDL_Error: %s)", #x, SDL_GetError()), 0))
