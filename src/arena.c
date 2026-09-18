@@ -19,13 +19,21 @@ void arena_destroy(Arena* self) {
 }
 
 void* arena_alloc(Arena* self, size_t size) {
-    void* ptr = ALIGN((uintptr_t)self->mem + self->offset, ARENA_DEFAULT_ALIGNMENT);
+    return arena_alloc_align(self, size, ARENA_DEFAULT_ALIGN);
+}
 
-    if (!CHECK((uintptr_t)ptr + size <= (uintptr_t)self->mem + self->cap, "Not enough memory")) {
+void* arena_alloc_align(Arena* self, size_t size, size_t align) {
+    void* ptr = ALIGN((uintptr_t)self->mem + self->offset, align);
+
+    if (!CHECK((uintptr_t)ptr + size <= (uintptr_t)self->mem + self->cap, "Not enough memory: %lu (desired) > %lu (actual)", (uintptr_t)ptr + size - (uintptr_t)self->mem, self->cap)) {
         return NULL;
     }
 
     self->offset = (uintptr_t)ptr - (uintptr_t)self->mem + size;
     return ptr;
+}
+
+void arena_reset(Arena* self) {
+    self->offset = 0;
 }
 
