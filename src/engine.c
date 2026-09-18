@@ -13,9 +13,9 @@
 
 #define DEFAULT_STORAGE_BUFFER_SIZE (512*512)
 
-#define FONT_ATLAS_WIDTH  512
-#define FONT_ATLAS_HEIGHT 512
-#define FONT_SIZE         12
+#define FONT_ATLAS_WIDTH  128
+#define FONT_ATLAS_HEIGHT 128
+#define FONT_SIZE         16
 
 #define WORLD_UP ((Vec3){ .x = 0.0f, .y = 1.0f, .z = 0.0f })
 #define DEFAULT_CAMERA_SENSITIVITY 0.01f
@@ -184,7 +184,19 @@ bool engine_create(Engine* self, const char* compute_shader_path, const char* de
         self->font_atlas.data
     );
     SDL_free(font_file_data);
-    // Upload to GPU texture
+    // Create GPU texture and upload to it
+    SDL_GPUTextureCreateInfo font_atlas_texture_create_info = {
+        .type                 = SDL_GPU_TEXTURETYPE_2D,
+        .format               = SDL_GPU_TEXTUREFORMAT_A8_UNORM,
+        .usage                = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width                = self->font_atlas.width,
+        .height               = self->font_atlas.height,
+        .layer_count_or_depth = 1,
+        .num_levels           = 1,
+    };
+    if (!SDL_CHECK(self->font_atlas_texture = SDL_CreateGPUTexture(self->device, &font_atlas_texture_create_info))) {
+        return false;
+    }
     engine_upload_to_texture(
         self,
         self->font_atlas_texture,
@@ -209,12 +221,15 @@ bool engine_create(Engine* self, const char* compute_shader_path, const char* de
 }
 
 void engine_destroy(Engine* self) {
+    SDL_ReleaseGPUTexture(self->device, self->font_atlas_texture);
+
     SDL_ReleaseGPUBuffer(self->device, self->storage_buffer);
     SDL_ReleaseGPUComputePipeline(self->device, self->compute_pipeline);
 
     shaderc_compile_options_release(self->shader_compile_options);
     shaderc_compiler_release(self->shader_compiler);
 
+    SDL_ReleaseGPUTransferBuffer(self->device, self->transfer_buffer);
     SDL_ReleaseGPUSampler(self->device, self->screen_texture_sampler);
     SDL_ReleaseGPUTexture(self->device, self->screen_texture);
     SDL_ReleaseGPUGraphicsPipeline(self->device, self->graphics_pipeline);
@@ -247,8 +262,6 @@ void engine_run(Engine* self) {
 
         engine_update_mouse(self);
         engine_update_camera(self);
-
-        INFO("(%f, %f, %f)", self->camera.pos.x, self->camera.pos.y, self->camera.pos.z);
 
         engine_hot_reload_compute(self);
 
