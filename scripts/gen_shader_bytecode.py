@@ -2,11 +2,10 @@ import os
 import shutil
 import subprocess
 
-# --- Configuration (Fill these in) ---
-VERT_SRC = "shaders/screen_quad.vert"
-FRAG_SRC = "shaders/screen_quad.frag"
-OUTPUT_HEADER = "src/generated/screen_quad_shaders.h"
-# -------------------------------------
+# --- Configuration ---
+SHADER_DIR = "shaders"
+OUTPUT_HEADER = "src/engine/generated/screen_quad_shaders.h"
+# ---------------------
 
 def check_glslc():
     """Check if glslc is available in the system PATH."""
@@ -46,33 +45,48 @@ def spirv_to_c_array(spv_path, array_name):
     formatted_array = ",\n".join(lines)
     return f"const uint32_t {array_name}[] = {{\n{formatted_array}\n}};\n"
 
+def process_shader_pair(name, shader_dir=SHADER_DIR):
+    """
+    Given a shader base name (e.g. 'text'), compiles <name>.vert and <name>.frag
+    to temporary SPIR-V files, converts them into C arrays (<name>_vs_bytecode,
+    <name>_fs_bytecode), cleans up temp files, and returns the generated code string.
+    """
+    vert_src = os.path.join(shader_dir, f"{name}.vert")
+    frag_src = os.path.join(shader_dir, f"{name}.frag")
+    temp_vert_spv = f"temp_{name}_vert.spv"
+    temp_frag_spv = f"temp_{name}_frag.spv"
+
+    try:
+        # Compile
+        compile_to_spirv(vert_src, temp_vert_spv)
+        compile_to_spirv(frag_src, temp_frag_spv)
+
+        # Convert to C arrays
+        vert_code = spirv_to_c_array(temp_vert_spv, f"{name}_vs_bytecode")
+        frag_code = spirv_to_c_array(temp_frag_spv, f"{name}_fs_bytecode")
+
+        return f"{vert_code}\n{frag_code}\n"
+    finally:
+        # Cleanup temporary files
+        if os.path.exists(temp_vert_spv):
+            os.remove(temp_vert_spv)
+        if os.path.exists(temp_frag_spv):
+            os.remove(temp_frag_spv)
+
 def main():
     check_glslc()
 
-    # Temporary SPIR-V output files
-    vert_spv = "temp_vert.spv"
-    frag_spv = "temp_frag.spv"
+    shaders_to_compile = ["screen_quad", "text"]
+    header_content = ["#pragma once\n#include <stdint.h>\n\n"]
 
-    # Compile
-    compile_to_spirv(VERT_SRC, vert_spv)
-    compile_to_spirv(FRAG_SRC, frag_spv)
-
-    # Convert to C arrays
     print(f"Generating {OUTPUT_HEADER}...")
-    vert_c_code = spirv_to_c_array(vert_spv, "screen_quad_vs_bytecode")
-    frag_c_code = spirv_to_c_array(frag_spv, "screen_quad_fs_bytecode")
+    for shader_name in shaders_to_compile:
+        header_content.append(process_shader_pair(shader_name))
 
-    # Write the header file
+    os.makedirs(os.path.dirname(OUTPUT_HEADER), exist_ok=True)
     with open(OUTPUT_HEADER, "w") as f:
-        f.write("#pragma once\n")
-        f.write("#include <stdint.h>\n\n")
-        f.write(vert_c_code)
-        f.write("\n")
-        f.write(frag_c_code)
+        f.write("\n".join(header_content))
 
-    # Cleanup temporary SPIR-V files
-    os.remove(vert_spv)
-    os.remove(frag_spv)
     print("Done!")
 
 if __name__ == "__main__":

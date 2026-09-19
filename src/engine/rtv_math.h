@@ -2,17 +2,32 @@
 
 #define RADIANS(x) (x * M_PI / 180.0)
 
-typedef struct Vec2_t {
+typedef struct Vec2 {
     f32 x, y;
 } Vec2;
 
-typedef struct Vec3_t {
+typedef struct Vec3 {
     f32 x, y, z;
 } Vec3;
 
-typedef struct Vec4_t {
+typedef struct Vec4 {
     f32 x, y, z, w;
 } Vec4;
+
+typedef union Mat4 {
+    float data[16];
+
+    float m[4][4];
+
+    Vec4 cols[4];
+
+    struct {
+        float m00, m01, m02, m03;
+        float m10, m11, m12, m13;
+        float m20, m21, m22, m23;
+        float m30, m31, m32, m33;
+    };
+} Mat4;
 
 static inline f32 clamp(f32 x, f32 min, f32 max) {
     if (x < min) {

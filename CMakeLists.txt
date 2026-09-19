@@ -14,6 +14,8 @@ find_package(SDL3 REQUIRED CONFIG)
 # Source files
 file(GLOB SRCS
     src/*.c
+    src/core/*.c
+    src/engine/*.c
     vendor/**/*.c
 )
 
@@ -30,6 +32,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wall)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     m
     SDL3::SDL3
-    shaderc
+    shaderc_shared
+    stdc++
 )
 
