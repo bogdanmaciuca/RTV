@@ -88,3 +88,29 @@ static inline Vec4 vec4_from_vec3(Vec3 v, f32 w) {
     return (Vec4){ .x = v.x, .y = v.y, .z = v.z, .w = w };
 }
 
+static inline Mat4 proj_ortho(float width, float height) {
+    // Near and far depth bounds (0 to 1 for SDL_GPU)
+    float near_z = 0.0f;
+    float far_z  = 1.0f;
+    float fn     = far_z - near_z;
+
+    Mat4 res = {0};
+
+    // Column 0 (X scale & translation)
+    res.m[0][0] = 2.0f / width;
+
+    // Column 1 (Y scale & translation: flips Y so 0 is top)
+    res.m[1][1] = -2.0f / height;
+
+    // Column 2 (Z mapping: [0, 1] depth range)
+    res.m[2][2] = 1.0f / fn;
+
+    // Column 3 (Translation / Offsets)
+    res.m[3][0] = -1.0f;
+    res.m[3][1] =  1.0f;
+    res.m[3][2] = -near_z / fn;
+    res.m[3][3] =  1.0f;
+
+    return res;
+}
+

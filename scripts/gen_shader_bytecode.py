@@ -4,7 +4,8 @@ import subprocess
 
 # --- Configuration ---
 SHADER_DIR = "shaders"
-OUTPUT_HEADER = "src/engine/generated/screen_quad_shaders.h"
+OUTPUT_HEADER = "src/engine/generated/shaders_bytecode.h"
+OUTPUT_SOURCE = "src/engine/generated/shaders_bytecode.c"
 # ---------------------
 
 def check_glslc():
@@ -23,7 +24,7 @@ def compile_to_spirv(src_path, spv_path):
         exit(1)
 
 def spirv_to_c_array(spv_path, array_name):
-    """Read SPIR-V binary and format it as a C uint32_t array string."""
+    """Read SPIR-V binary and return (header_decl, source_def)."""
     with open(spv_path, "rb") as f:
         data = f.read()
 
@@ -43,13 +44,19 @@ def spirv_to_c_array(spv_path, array_name):
         lines.append("    " + ", ".join(words[i:i+8]))
 
     formatted_array = ",\n".join(lines)
-    return f"const uint32_t {array_name}[] = {{\n{formatted_array}\n}};\n"
+
+    decl = f"extern const uint32_t {array_name}[];\nextern const size_t {array_name}_size;\n"
+    defn = (
+        f"const uint32_t {array_name}[] = {{\n{formatted_array}\n}};\n"
+            f"const size_t {array_name}_size = sizeof({array_name});\n"
+    )
+    return decl, defn
 
 def process_shader_pair(name, shader_dir=SHADER_DIR):
     """
     Given a shader base name (e.g. 'text'), compiles <name>.vert and <name>.frag
-    to temporary SPIR-V files, converts them into C arrays (<name>_vs_bytecode,
-    <name>_fs_bytecode), cleans up temp files, and returns the generated code string.
+    to temporary SPIR-V files, cleans up temp files, and returns header declarations
+    and source definitions.
     """
     vert_src = os.path.join(shader_dir, f"{name}.vert")
     frag_src = os.path.join(shader_dir, f"{name}.frag")
@@ -62,10 +69,10 @@ def process_shader_pair(name, shader_dir=SHADER_DIR):
         compile_to_spirv(frag_src, temp_frag_spv)
 
         # Convert to C arrays
-        vert_code = spirv_to_c_array(temp_vert_spv, f"{name}_vs_bytecode")
-        frag_code = spirv_to_c_array(temp_frag_spv, f"{name}_fs_bytecode")
+        vert_decl, vert_defn = spirv_to_c_array(temp_vert_spv, f"{name}_vs_bytecode")
+        frag_decl, frag_defn = spirv_to_c_array(temp_frag_spv, f"{name}_fs_bytecode")
 
-        return f"{vert_code}\n{frag_code}\n"
+        return f"{vert_decl}{frag_decl}\n", f"{vert_defn}\n{frag_defn}\n"
     finally:
         # Cleanup temporary files
         if os.path.exists(temp_vert_spv):
@@ -77,15 +84,23 @@ def main():
     check_glslc()
 
     shaders_to_compile = ["screen_quad", "text"]
-    header_content = ["#pragma once\n#include <stdint.h>\n\n"]
+    header_filename = os.path.basename(OUTPUT_HEADER)
 
-    print(f"Generating {OUTPUT_HEADER}...")
+    header_content = ["#pragma once\n#include <stddef.h>\n#include <stdint.h>\n\n"]
+    source_content = [f'#include "{header_filename}"\n\n']
+
+    print(f"Generating {OUTPUT_HEADER} and {OUTPUT_SOURCE}...")
     for shader_name in shaders_to_compile:
-        header_content.append(process_shader_pair(shader_name))
+        decls, defns = process_shader_pair(shader_name)
+        header_content.append(decls)
+        source_content.append(defns)
 
     os.makedirs(os.path.dirname(OUTPUT_HEADER), exist_ok=True)
     with open(OUTPUT_HEADER, "w") as f:
         f.write("\n".join(header_content))
+
+    with open(OUTPUT_SOURCE, "w") as f:
+        f.write("\n".join(source_content))
 
     print("Done!")
 

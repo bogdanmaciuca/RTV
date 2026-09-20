@@ -16,6 +16,7 @@ file(GLOB SRCS
     src/*.c
     src/core/*.c
     src/engine/*.c
+    src/engine/generated/*.c
     vendor/**/*.c
 )
 

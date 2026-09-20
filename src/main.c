@@ -1,10 +1,11 @@
 #include "engine/engine.h"
 
 // TODO:
-// - create pipeline for drawing text
+// - import some voxel models
+// - do DDA
 
 int main() {
-    Engine* engine = engine_create("shaders/rtv.comp");
+    Engine* engine = engine_create();
     if (!engine)
         return 1;
 
